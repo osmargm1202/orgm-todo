@@ -1,134 +1,113 @@
 # orgm-todo
 
-CLI de seguimiento ORGM sobre un vault de Obsidian. Los archivos Markdown son la única fuente de verdad: no usa base de datos, caché ni regeneración de notas. Las ediciones hechas directamente en Obsidian siguen siendo válidas.
+CLI para seguimiento ORGM directamente sobre un vault de Obsidian. Markdown es la única fuente de verdad: no usa base de datos, caché ni regeneración destructiva de notas.
 
-## Instalación
-
-```sh
-rtk uv tool install git+https://github.com/osmargm1202/orgm-todo.git
-```
-
-Actualizar:
+## Installation
 
 ```sh
-rtk uv tool install --force git+https://github.com/osmargm1202/orgm-todo.git
+uv tool install git+https://github.com/osmargm1202/orgm-todo.git
 ```
 
-Desinstalar:
+Actualizar o reinstalar:
 
 ```sh
-rtk uv tool uninstall orgm-todo
+uv tool install --force git+https://github.com/osmargm1202/orgm-todo.git
 ```
 
-## Configuración
-
-Inicialice el vault una vez. Solo crea elementos ausentes y conserva todo el contenido existente:
+## Setup
 
 ```sh
-orgm-todo init --vault /ruta/al/vault
+orgm-todo init --vault /path/to/vault
+orgm-todo config show
+orgm-todo config set-vault /path/to/another-vault
 ```
 
-La ruta se guarda en `$XDG_CONFIG_HOME/orgm-todo/config.toml` (o `~/.config/orgm-todo/config.toml`). Si se omite `--vault`, `init` busca la ruta configurada, el directorio actual si tiene `.obsidian/`, o el único vault abierto de Obsidian.
+`init` crea solo los elementos ausentes: `General.md`, directorios bajo `ORGM/` y el bloque administrado de `AGENTS.md`. Todo texto manual fuera de ese bloque se conserva. La configuración se guarda en `$XDG_CONFIG_HOME/orgm-todo/config.toml`.
 
-La estructura administrada es:
+## Vault model
 
-```text
-General.md
-ORGM/Clientes/
-ORGM/Proyectos/
-ORGM/Baul/Clientes/
-ORGM/Baul/Proyectos/
-AGENTS.md
-```
+- `General.md` es un índice manual de áreas, clientes y proyectos. Sus enlaces `[[...]]` **no** aparecen en `summary`.
+- Cada proyecto activo vive en `ORGM/Proyectos/` y conserva notas, datos y tareas Markdown editables directamente en Obsidian.
+- Solo una casilla pendiente `- [ ]` es una tarea visible en `summary`. Las notas y las casillas `- [x]` no aparecen allí.
+- Archivar mueve el proyecto a `ORGM/Baul/Proyectos/` y oculta sus enlaces. Restaurar devuelve la nota y los índices de `General.md` y del cliente exactamente a su posición y formato originales.
 
-`AGENTS.md` conserva cualquier texto manual fuera de su bloque `orgm-todo`. `.trash/` nunca se toca.
+El parser respeta BOM, LF/CRLF, frontmatter, fences Markdown, indentación, listas, IDs y valores de tabla escapados. Las mutaciones usan reemplazo atómico y detectan cambios concurrentes.
+
+## Commands
+
+Todos los comandos y opciones de la CLI están en inglés.
+
+### Clients
 
 ```sh
-orgm-todo config mostrar
-orgm-todo config vault /ruta/otro-vault
+orgm-todo client create ERIC --phone 809-555-0100 --data "Company=ORGM"
+orgm-todo client list
+orgm-todo client view ERIC
+orgm-todo client update ERIC --data "Email=eric@example.com" --remove-data Phone
+orgm-todo client rename ERIC "ERIC SA"
+orgm-todo client archive "ERIC SA"
 ```
 
-## Markdown compatible
+Opciones rápidas de creación: `--company`, `--contact`, `--phone`, `--email`, `--address`. `--data FIELD=VALUE` acepta campos adicionales.
 
-Use encabezados ATX, viñetas y casillas normales:
-
-```md
-## Correcciones
-- Nota manual
-- [ ] Revisar plano 📅 2026-10-30
-```
-
-El CLI reconoce `-`, `*`, `+` y listas numeradas; casillas `[ ]`, `[x]` y `[X]`; fechas `📅 YYYY-MM-DD`; enlaces `[[Nota]]`; y tablas pipe. Mantiene saltos de línea, BOM, indentación y contenido desconocido. Al crear o modificar una entrada añade un identificador estable `^orgm-xxxxxxxx`. Las entradas manuales sin ID siguen apareciendo en listas y resúmenes.
-
-## Clientes y proyectos
+### Projects and titles
 
 ```sh
-orgm-todo cliente crear ERIC --telefono 809-555-0100 --dato "Empresa=ORGM"
-orgm-todo cliente listar
-orgm-todo cliente ver ERIC
-orgm-todo cliente actualizar ERIC --dato "Correo=eric@example.com" --quitar-dato Teléfono
-orgm-todo cliente renombrar ERIC "ERIC SA"
-orgm-todo cliente archivar "ERIC SA"
+orgm-todo project create "Project 1" --client ERIC --title Correcciones --title Compras
+orgm-todo project list
+orgm-todo project view "Project 1"
+orgm-todo project update "Project 1" --status "On hold"
+orgm-todo project update "Project 1" --client "Another client"
+orgm-todo project rename "Project 1" "New project"
+orgm-todo project archive "New project"
+orgm-todo project restore "New project"
 
-orgm-todo proyecto crear "Proyecto 1" --cliente "ERIC SA" --titulo Correcciones --titulo Compras
-orgm-todo proyecto listar
-orgm-todo proyecto ver "Proyecto 1"
-orgm-todo proyecto actualizar "Proyecto 1" --estado En pausa
-orgm-todo proyecto actualizar "Proyecto 1" --cliente "Otro cliente"
-orgm-todo proyecto renombrar "Proyecto 1" "Proyecto nuevo"
-orgm-todo proyecto archivar "Proyecto nuevo"
-orgm-todo proyecto restaurar "Proyecto nuevo"
+orgm-todo title add Correcciones --project "New project"
+orgm-todo title rename Correcciones "HVAC corrections" --project "New project"
+orgm-todo title delete "HVAC corrections" --project "New project" --force
 ```
 
-Al crear, restaurar, cambiar de cliente o renombrar, se actualizan únicamente los wikilinks exactos de `General.md` y las notas de cliente. Un cliente con proyectos activos no se puede archivar.
+### Notes and tasks
 
-## Títulos, notas y tareas
-
-Sin `--proyecto`, estos comandos operan **solo** en `General.md`. Sin `--titulo`, crean/usan `Pendiente`.
+Sin `--project`, estos comandos operan sobre `General.md`; sin `--title`, usan `Pendiente`.
 
 ```sh
-orgm-todo titulo agregar Correcciones --proyecto "Proyecto nuevo"
-orgm-todo titulo renombrar Correcciones "Correcciones HVAC" --proyecto "Proyecto nuevo"
-orgm-todo titulo eliminar "Correcciones HVAC" --proyecto "Proyecto nuevo" --force
+orgm-todo note add "Confirm quotation" --project "New project" --title Correcciones
+orgm-todo note list --project "New project"
+orgm-todo note update orgm-a1b2c3d4 --text "Confirm final quotation" --project "New project"
+orgm-todo note move orgm-a1b2c3d4 --title Pendiente --project "New project"
+orgm-todo note delete orgm-a1b2c3d4 --project "New project"
 
-orgm-todo nota agregar "Confirmar cotización" --titulo Correcciones --proyecto "Proyecto nuevo"
-orgm-todo nota listar --proyecto "Proyecto nuevo"
-orgm-todo nota actualizar orgm-a1b2c3d4 --texto "Confirmar cotización final" --proyecto "Proyecto nuevo"
-orgm-todo nota mover orgm-a1b2c3d4 --titulo Pendiente --proyecto "Proyecto nuevo"
-orgm-todo nota eliminar orgm-a1b2c3d4 --proyecto "Proyecto nuevo"
-
-orgm-todo tarea agregar "Informe mensual" --titulo Correcciones --proyecto "Proyecto nuevo" --fecha 2026-10-30
-orgm-todo tarea listar --proyecto "Proyecto nuevo"
-orgm-todo tarea completar orgm-a1b2c3d4 --proyecto "Proyecto nuevo"
-orgm-todo tarea pendiente orgm-a1b2c3d4 --proyecto "Proyecto nuevo"
-orgm-todo tarea actualizar orgm-a1b2c3d4 --texto "Informe corregido" --fecha 2026-11-01 --proyecto "Proyecto nuevo"
-orgm-todo tarea actualizar orgm-a1b2c3d4 --sin-fecha --proyecto "Proyecto nuevo"
-orgm-todo tarea mover orgm-a1b2c3d4 --titulo Pendiente --proyecto "Proyecto nuevo"
-orgm-todo tarea eliminar orgm-a1b2c3d4 --proyecto "Proyecto nuevo"
+orgm-todo task add "Monthly report" --project "New project" --title Correcciones --date 2026-10-30
+orgm-todo task list --project "New project"
+orgm-todo task complete orgm-a1b2c3d4 --project "New project"
+orgm-todo task pending orgm-a1b2c3d4 --project "New project"
+orgm-todo task update orgm-a1b2c3d4 --text "Corrected report" --date 2026-11-01 --project "New project"
+orgm-todo task update orgm-a1b2c3d4 --no-date --project "New project"
+orgm-todo task move orgm-a1b2c3d4 --title Pendiente --project "New project"
+orgm-todo task delete orgm-a1b2c3d4 --project "New project"
 ```
 
-Un selector se resuelve primero como ID exacto y después como subcadena única, sin distinguir mayúsculas. Ante una coincidencia ambigua no modifica el archivo e informa candidatos.
+A selector resolves first as exact `orgm-xxxxxxxx` ID, then as a unique case-insensitive text substring. Ambiguous selectors make no changes.
 
-### Recurrencia visible
-
-Cada ocurrencia se materializa como una casilla Markdown con fecha e ID propios. No hay reglas ocultas:
+### Recurrence
 
 ```sh
-orgm-todo tarea agregar "Informe mensual" --proyecto "Proyecto nuevo" --titulo Correcciones \
-  --cada mes --desde 2026-09-30 --hasta 2026-11-30
-orgm-todo tarea agregar "Reunión semanal" --cada semana --desde 2026-10-01 --hasta 2026-10-31
+orgm-todo task add "Monthly report" --project "New project" --title Correcciones \
+  --every month --from 2026-09-30 --to 2026-11-30
+orgm-todo task add "Weekly meeting" --every week --from 2026-10-01 --to 2026-10-31
 ```
 
-`semana` suma siete días. `mes` conserva el día inicial y usa el último día disponible en meses más cortos.
+Each occurrence becomes an independent dated Markdown task with its own ID. `week` adds seven days; `month` retains the initial day and uses the final valid day of shorter months.
 
-## Resúmenes
+### Summary
 
 ```sh
-orgm-todo resumen --titulo Correcciones
-orgm-todo resumen --titulo Correcciones --semana
-orgm-todo resumen --titulo Correcciones --mes 2026-10
-orgm-todo resumen --desde 2026-10-01 --hasta 2026-10-31
-orgm-todo resumen --proyecto "Proyecto nuevo" --incluir-hechas --incluir-sin-fecha
+orgm-todo summary
+orgm-todo summary --title Correcciones
+orgm-todo summary --project "New project" --week
+orgm-todo summary --month 2026-10
+orgm-todo summary --from 2026-10-01 --to 2026-10-31 --include-undated
 ```
 
-Los filtros temporales son inclusivos. `--semana` significa lunes a domingo local. Las tareas hechas se excluyen por defecto; las notas y tareas sin fecha entran en filtros temporales solo con `--incluir-sin-fecha`. Los resúmenes ignoran clientes, baúles, `.trash/` y `.obsidian/`.
+`summary` scans active projects only. It groups pending tasks by title and project; completed tasks, notes, client files, archived projects and all `General.md` index links are excluded. Time ranges are inclusive; `--week` is Monday through Sunday in local time.

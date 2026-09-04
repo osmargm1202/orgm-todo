@@ -74,27 +74,38 @@ def test_parser_preserves_frontmatter_crlf_and_detects_concurrent_change(tmp_pat
         doc.replace(doc.lines)
 
 
+def test_parser_ignores_mixed_fence_delimiters(tmp_path: Path) -> None:
+    path = tmp_path / "Documento.md"
+    path.write_text(
+        "# Documento\n\n~~~python\n``` literal\n- [ ] Ignorada\n~~~~\n\n## Pendiente\n- [ ] Activa\n",
+        encoding="utf-8",
+    )
+    assert [item.text for item in parse_document(path).items] == ["Activa"]
+
+
 def test_client_project_indexes_and_archive_restore(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     store.create_client("ERIC", {"Teléfono": "809-555-0100"})
     store.create_project("Proyecto 1", "ERIC", ["Correcciones"])
-    assert "[[Proyecto 1]]" in (root / "General.md").read_text(encoding="utf-8")
-    assert "[[Proyecto 1]]" in (root / "ORGM/Clientes/ERIC.md").read_text(encoding="utf-8")
+    store.update_project("Proyecto 1", status="En pausa")
+    general, client, project = root / "General.md", root / "ORGM/Clientes/ERIC.md", root / "ORGM/Proyectos/Proyecto 1.md"
+    before_general, before_client, before_project = general.read_bytes(), client.read_bytes(), project.read_bytes()
     with pytest.raises(VaultError, match="proyectos activos"):
         store.archive_client("ERIC")
     store.archive_project("Proyecto 1")
-    assert not (root / "ORGM/Proyectos/Proyecto 1.md").exists()
-    assert "[[Proyecto 1]]" not in (root / "General.md").read_text(encoding="utf-8")
+    assert not project.exists()
+    assert "[[Proyecto 1]]" not in general.read_text(encoding="utf-8")
     store.restore_project("Proyecto 1")
-    assert (root / "ORGM/Proyectos/Proyecto 1.md").exists()
-    assert "| Estado | Activo |" in (root / "ORGM/Proyectos/Proyecto 1.md").read_text(encoding="utf-8")
+    assert project.read_bytes() == before_project
+    assert general.read_bytes() == before_general
+    assert client.read_bytes() == before_client
 
 
 def test_tasks_manual_notes_selectors_moves_and_recurrence(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     store.create_client("ERIC", {})
     store.create_project("Proyecto 1", "ERIC", ["Correcciones", "Pendiente"])
-    ids = store.recurring_tasks("Informe", "mes", date(2026, 9, 30), date(2026, 11, 30), "Correcciones", "Proyecto 1")
+    ids = store.recurring_tasks("Informe", "month", date(2026, 9, 30), date(2026, 11, 30), "Correcciones", "Proyecto 1")
     assert len(ids) == 3
     project = root / "ORGM/Proyectos/Proyecto 1.md"
     project.write_text(project.read_text(encoding="utf-8").replace("## Correcciones\n", "## Correcciones\n- Nota manual\n"), encoding="utf-8")
@@ -122,17 +133,21 @@ def test_rename_updates_exact_wikilinks_without_plain_text(configured: tuple[Pat
     assert "[[ERIC SA]]" in (root / "ORGM/Proyectos/Proyecto Nuevo.md").read_text(encoding="utf-8")
 
 
-def test_summary_filters_and_empty_title(configured: tuple[Path, Vault]) -> None:
-    _, store = configured
+def test_summary_shows_only_pending_project_tasks(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
     store.create_client("ERIC", {})
     store.create_project("Proyecto 1", "ERIC", ["Correcciones"])
     store.add_task("Fechada", "Correcciones", "Proyecto 1", "2026-10-30")
+    done = store.add_task("Completada", "Correcciones", "Proyecto 1", "2026-10-30")
+    store.set_task_state(done, True, "Proyecto 1")
+    store.add_task("Sin fecha", "Correcciones", "Proyecto 1")
     store.add_note("Manual", "Correcciones", "Proyecto 1")
-    entries = store.summaries("Correcciones", None, False, False, date(2026, 10, 1), date(2026, 10, 31))
+    (root / "General.md").write_text("# General\n\n## [[D&D]]\n\n1. [[Proyecto 1]]\n", encoding="utf-8")
+    entries = store.summaries("Correcciones", start=date(2026, 10, 1), until=date(2026, 10, 31))
     assert [entry.text for entry in entries] == ["Fechada"]
-    entries = store.summaries("Correcciones", None, False, True, date(2026, 10, 1), date(2026, 10, 31))
-    assert {entry.text for entry in entries} == {"Fechada", "Manual"}
-    assert store.summaries("Correcciones", None, False, False, date(2026, 12, 1), date(2026, 12, 31)) == []
+    entries = store.summaries("Correcciones", include_undated=True, start=date(2026, 10, 1), until=date(2026, 10, 31))
+    assert {entry.text for entry in entries} == {"Fechada", "Sin fecha"}
+    assert store.summaries("Correcciones", start=date(2026, 12, 1), until=date(2026, 12, 31)) == []
 
 
 def test_summary_includes_project_with_empty_requested_title(configured: tuple[Path, Vault]) -> None:
@@ -148,9 +163,9 @@ def test_cli_init_and_task_commands_use_isolated_config(tmp_path: Path, monkeypa
     (root / ".obsidian").mkdir(parents=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     assert runner.invoke(app, ["init", "--vault", str(root)]).exit_code == 0
-    assert runner.invoke(app, ["cliente", "crear", "ERIC"]).exit_code == 0
-    assert runner.invoke(app, ["proyecto", "crear", "Proyecto 1", "--cliente", "ERIC", "--titulo", "Correcciones"]).exit_code == 0
-    result = runner.invoke(app, ["tarea", "agregar", "Informe", "--proyecto", "Proyecto 1", "--titulo", "Correcciones", "--cada", "mes", "--desde", "2026-09-30", "--hasta", "2026-11-30"])
+    assert runner.invoke(app, ["client", "create", "ERIC"]).exit_code == 0
+    assert runner.invoke(app, ["project", "create", "Proyecto 1", "--client", "ERIC", "--title", "Correcciones"]).exit_code == 0
+    result = runner.invoke(app, ["task", "add", "Informe", "--project", "Proyecto 1", "--title", "Correcciones", "--every", "month", "--from", "2026-09-30", "--to", "2026-11-30"])
     assert result.exit_code == 0, result.output
     assert result.output.count("orgm-") == 3
 
@@ -160,10 +175,10 @@ def test_cli_normalizes_duplicate_client_fields(tmp_path: Path, monkeypatch: pyt
     (root / ".obsidian").mkdir(parents=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     assert runner.invoke(app, ["init", "--vault", str(root)]).exit_code == 0
-    equal = runner.invoke(app, ["cliente", "crear", "ERIC", "--dato", "Correo=x", "--dato", " correo =x"])
+    equal = runner.invoke(app, ["client", "create", "ERIC", "--data", "Correo=x", "--data", " correo =x"])
     assert equal.exit_code == 0, equal.output
     assert (root / "ORGM/Clientes/ERIC.md").read_text(encoding="utf-8").count("| Correo | x |") == 1
-    conflict = runner.invoke(app, ["cliente", "crear", "CONFLICTO", "--dato", "Correo=x", "--correo", "y"])
+    conflict = runner.invoke(app, ["client", "create", "CONFLICTO", "--data", "Correo=x", "--email", "y"])
     assert conflict.exit_code == 1
     assert "Campo duplicado" in conflict.output
     assert not (root / "ORGM/Clientes/CONFLICTO.md").exists()
@@ -176,11 +191,11 @@ def test_cli_config_show_and_change_vault(tmp_path: Path, monkeypatch: pytest.Mo
     (second / ".obsidian").mkdir(parents=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     assert runner.invoke(app, ["init", "--vault", str(first)]).exit_code == 0
-    shown = runner.invoke(app, ["config", "mostrar"])
+    shown = runner.invoke(app, ["config", "show"])
     assert shown.exit_code == 0 and f"vault = {first}" in shown.output
-    changed = runner.invoke(app, ["config", "vault", str(second)])
+    changed = runner.invoke(app, ["config", "set-vault", str(second)])
     assert changed.exit_code == 0, changed.output
-    shown = runner.invoke(app, ["config", "mostrar"])
+    shown = runner.invoke(app, ["config", "show"])
     assert shown.exit_code == 0 and f"vault = {second}" in shown.output
 
 def test_numbered_preexisting_index_is_not_duplicated_and_is_removed(configured: tuple[Path, Vault]) -> None:
@@ -207,11 +222,10 @@ def test_project_index_accepts_bare_client_heading(configured: tuple[Path, Vault
     assert "- [[Proyecto 1]]" in text
 
 
-def test_summary_includes_items_before_first_heading(configured: tuple[Path, Vault]) -> None:
+def test_summary_excludes_general_index(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     (root / "General.md").write_text("# General\n\n- [ ] Sin título 📅 2026-10-30\n", encoding="utf-8")
-    entries = store.summaries("General", start=date(2026, 10, 1), until=date(2026, 10, 31))
-    assert [(entry.title, entry.text) for entry in entries] == [("General", "Sin título")]
+    assert store.summaries("General", start=date(2026, 10, 1), until=date(2026, 10, 31)) == []
 def test_task_state_changes_only_checkbox_character_with_crlf(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     general = root / "General.md"
@@ -274,3 +288,11 @@ def test_updates_preserve_crlf_and_manual_spacing(configured: tuple[Path, Vault]
         "  + [X]   tarea nueva   📅   2026-11-01  ^orgm-22222222\r\n"
     )
     assert general.read_bytes() == expected.encode("utf-8")
+
+
+def test_cli_exposes_only_english_command_names() -> None:
+    help_output = runner.invoke(app, ["--help"])
+    assert help_output.exit_code == 0
+    assert "client" in help_output.output and "summary" in help_output.output
+    assert "cliente" not in help_output.output and "resumen" not in help_output.output
+    assert runner.invoke(app, ["cliente", "--help"]).exit_code != 0

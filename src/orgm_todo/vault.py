@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import calendar
 import re
 from dataclasses import dataclass
@@ -204,6 +205,42 @@ class Vault:
         if lines != doc.lines:
             doc.replace(lines)
 
+    def _archive_index_link(self, path: Path, target: str) -> bool:
+        doc = parse_document(path)
+        lines = doc.lines.copy()
+        changed = False
+        for index, line in enumerate(lines):
+            if exact_wikilink(line, target):
+                encoded = base64.urlsafe_b64encode(line.encode("utf-8")).decode("ascii")
+                ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+                lines[index] = f"<!-- orgm-todo:archived-index {encoded} -->{ending}"
+                changed = True
+        if changed:
+            doc.replace(lines)
+        return changed
+
+    def _restore_index_link(self, path: Path, target: str) -> bool:
+        doc = parse_document(path)
+        lines = doc.lines.copy()
+        existing = any(exact_wikilink(line, target) for line in lines)
+        changed = restored = False
+        for index, line in enumerate(lines):
+            marker = re.fullmatch(r"[ \t]*<!-- orgm-todo:archived-index ([A-Za-z0-9_-]+=*) -->\r?\n?", line)
+            if marker is None:
+                continue
+            try:
+                original = base64.urlsafe_b64decode(marker.group(1)).decode("utf-8")
+            except (UnicodeDecodeError, ValueError):
+                continue
+            if not exact_wikilink(original, target):
+                continue
+            lines[index] = "" if existing else original
+            existing = True
+            changed = restored = True
+        if changed:
+            doc.replace(lines)
+        return restored
+
     def _client_for_project(self, project: str) -> str:
         path = self._named_file("projects", project)
         doc = parse_document(path)
@@ -262,10 +299,10 @@ class Vault:
         if destination.exists():
             raise VaultError(f"Ya existe en el baúl: {source.stem}")
         client = self._client_for_project(source.stem)
-        self._update_fields(source, {"Estado": "Completado"}, set())
+        client_path = self._named_file("clients", client)
+        self._archive_index_link(self.config.general_path, source.stem)
+        self._archive_index_link(client_path, source.stem)
         source.replace(destination)
-        self._remove_link(self.config.general_path, source.stem)
-        self._remove_link(self._named_file("clients", client), source.stem)
 
     def restore_project(self, name: str) -> None:
         source = self._named_file("archive_projects", name)
@@ -282,11 +319,12 @@ class Vault:
                     client = re.sub(r"^\[\[([^\]|#]+).*", r"\1", cells[1])
         if not client:
             raise VaultError("Proyecto archivado sin Cliente válido")
-        self._named_file("clients", client)
+        client_path = self._named_file("clients", client)
         source.replace(destination)
-        self._update_fields(destination, {"Estado": "Activo"}, set())
-        self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
-        self._add_link(self._named_file("clients", client), "Proyectos", destination.stem)
+        if not self._restore_index_link(self.config.general_path, destination.stem):
+            self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
+        if not self._restore_index_link(client_path, destination.stem):
+            self._add_link(client_path, "Proyectos", destination.stem)
 
     def archive_client(self, name: str) -> None:
         source = self._named_file("clients", name)
@@ -496,14 +534,14 @@ class Vault:
         return item.ident or ""
 
     def recurring_tasks(self, text: str, every: str, start: date, until: date, title: str = "Pendiente", project: str | None = None) -> list[str]:
-        if every not in {"semana", "mes"} or until < start:
+        if every not in {"week", "month"} or until < start:
             raise VaultError("Recurrencia inválida")
         dates: list[date] = []
         current = start
         day = start.day
         while current <= until:
             dates.append(current)
-            if every == "semana":
+            if every == "week":
                 current += timedelta(days=7)
             else:
                 month = current.month % 12 + 1
@@ -515,29 +553,22 @@ class Vault:
         self,
         title: str | None = None,
         project: str | None = None,
-        include_done: bool = False,
         include_undated: bool = False,
         start: date | None = None,
         until: date | None = None,
     ) -> list[SummaryEntry]:
-        docs = [self._document(project)] if project else [self._document(), *(parse_document(path) for path in self._files("projects"))]
+        docs = [self._document(project)] if project else [parse_document(path) for path in self._files("projects")]
         results: list[SummaryEntry] = []
         wanted = normalize(title) if title else None
         for doc in docs:
-            name = "General" if doc.path == self.config.general_path else doc.path.stem
-            sections: list[tuple[str, list[Item]]] = []
-            general_items = [item for item in doc.items if item.title == "General"]
-            if general_items and (wanted is None or wanted == normalize("General")):
-                sections.append(("General", general_items))
+            name = doc.path.stem
             for header in doc.headers:
                 if header.level == 1 and normalize(header.text) == normalize(doc.path.stem):
                     continue
-                if wanted is None or normalize(header.text) == wanted:
-                    sections.append((header.text, doc.section_items(header)))
-            for heading, items in sections:
-                for item in items:
-                    if item.checked is True and not include_done:
-                        continue
+                if wanted is not None and normalize(header.text) != wanted:
+                    continue
+                tasks = [item for item in doc.section_items(header) if item.checked is False]
+                for item in tasks:
                     parsed: date | None = None
                     invalid = False
                     if item.due:
@@ -549,7 +580,7 @@ class Vault:
                     if temporal and (parsed is None or (start and parsed < start) or (until and parsed > until)):
                         if not (item.due is None and include_undated):
                             continue
-                    results.append(SummaryEntry(heading, name, item.text, item.checked, item.due, invalid))
-                if wanted and not items:
-                    results.append(SummaryEntry(heading, name, "", None, None, False))
+                    results.append(SummaryEntry(header.text, name, item.text, False, item.due, invalid))
+                if wanted and not tasks:
+                    results.append(SummaryEntry(header.text, name, "", None, None, False))
         return results

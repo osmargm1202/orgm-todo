@@ -120,15 +120,20 @@ def _ignored_lines(lines: list[str]) -> set[int]:
             if lines[index].strip() in {"---", "..."}:
                 ignored.update(range(index + 1))
                 break
-    fenced = False
+    fence: tuple[str, int] | None = None
     for index, line in enumerate(lines):
         if index in ignored:
             continue
-        if re.match(r"^[ \t]*(```|~~~)", line):
-            ignored.add(index)
-            fenced = not fenced
-        elif fenced:
-            ignored.add(index)
+        opening = re.match(r"^[ \t]*(`+|~+)", line)
+        if fence is None:
+            if opening:
+                fence = (opening.group(1)[0], len(opening.group(1)))
+                ignored.add(index)
+            continue
+        ignored.add(index)
+        closing = re.match(r"^[ \t]*(`+|~+)[ \t]*(?:\r?\n)?$", line)
+        if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= fence[1]:
+            fence = None
     return ignored
 
 
