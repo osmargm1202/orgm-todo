@@ -227,3 +227,22 @@ def test_move_and_delete_include_indented_task_continuations(configured: tuple[P
     assert "Eliminar" not in deleted
     assert "detalle eliminado" not in deleted
     assert "- [ ] Conservar ^orgm-33333333" in deleted
+
+
+def test_updates_preserve_crlf_and_manual_spacing(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
+    general = root / "General.md"
+    original = (
+        "# General\r\n\r\n## Correcciones\r\n"
+        "*   nota vieja  ^orgm-11111111\r\n"
+        "  + [X]   tarea vieja   📅   2026-10-30  ^orgm-22222222\r\n"
+    )
+    general.write_bytes(original.encode("utf-8"))
+    store.update_note("orgm-11111111", "nota nueva")
+    store.update_task("orgm-22222222", text="tarea nueva", due="2026-11-01")
+    expected = (
+        "# General\r\n\r\n## Correcciones\r\n"
+        "*   nota nueva  ^orgm-11111111\r\n"
+        "  + [X]   tarea nueva   📅   2026-11-01  ^orgm-22222222\r\n"
+    )
+    assert general.read_bytes() == expected.encode("utf-8")

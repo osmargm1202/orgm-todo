@@ -11,6 +11,8 @@ from pathlib import Path
 from .config import VaultConfig
 from .markdown import (
     DATE_RE,
+    ID_RE,
+    ITEM_RE,
     Document,
     Item,
     MarkdownError,
@@ -367,16 +369,42 @@ class Vault:
         return doc, matches[0]
 
     @staticmethod
-    def _line_for_item(item: Item, *, text: str | None = None, checked: bool | None = None, due: str | None | object = ..., ident: str | None = None) -> str:
-        content = text if text is not None else item.text
-        chosen_due = item.due if due is ... else due
-        line = f"{item.indent}{item.marker}"
-        if item.checked is not None:
-            line += f"[{'x' if (item.checked if checked is None else checked) else ' '}] "
-        line += content
-        if chosen_due:
-            line += f" 📅 {chosen_due}"
-        return append_id(line + "\n", ident or item.ident)
+    def _patch_item_raw(item: Item, *, text: str | None = None, due: str | None | object = ...) -> tuple[str, str]:
+        raw = item.raw
+        if text is not None:
+            match = ITEM_RE.match(raw)
+            if match is None:
+                raise VaultError("Entrada Markdown mal formada")
+            body = match.group("body").rstrip("\r\n")
+            identifier = ID_RE.search(body)
+            metadata_end = identifier.start() if identifier else len(body)
+            scheduled = DATE_RE.search(body[:metadata_end])
+            text_end = scheduled.start() if scheduled else metadata_end
+            while text_end and body[text_end - 1] in " \t":
+                text_end -= 1
+            text_start = len(body) - len(body.lstrip(" \t"))
+            offset = match.start("body")
+            raw = raw[: offset + text_start] + text + raw[offset + text_end :]
+        if due is not ...:
+            match = ITEM_RE.match(raw)
+            if match is None:
+                raise VaultError("Entrada Markdown mal formada")
+            body = match.group("body").rstrip("\r\n")
+            identifier = ID_RE.search(body)
+            metadata_end = identifier.start() if identifier else len(body)
+            scheduled = DATE_RE.search(body[:metadata_end])
+            offset = match.start("body")
+            if due is None and scheduled:
+                raw = raw[: offset + scheduled.start()] + raw[offset + scheduled.end() :]
+            elif due is not None and scheduled:
+                raw = raw[: offset + scheduled.start(1)] + due + raw[offset + scheduled.end(1) :]
+            elif due is not None:
+                insertion = offset + (identifier.start() if identifier else len(body))
+                raw = raw[:insertion] + f" 📅 {due}" + raw[insertion:]
+        ident = item.ident or new_id()
+        if item.ident is None:
+            raw = append_id(raw, ident)
+        return raw, ident
 
     def _ensure_title(self, doc: Document, title: str, create: bool) -> Document:
         if doc.section(title):
@@ -423,8 +451,9 @@ class Vault:
         doc, item = self._select(selector, project, False)
         if not text.strip() or "\n" in text or "\r" in text:
             raise VaultError("La nota debe ocupar una sola línea")
-        replace_item_line(doc, item, self._line_for_item(item, text=text.strip()))
-        return item.ident or ""
+        raw, ident = self._patch_item_raw(item, text=text.strip())
+        replace_item_line(doc, item, raw)
+        return ident
 
     def update_task(self, selector: str, project: str | None = None, text: str | None = None, due: str | None | object = ...) -> str:
         doc, item = self._select(selector, project, True)
@@ -432,8 +461,9 @@ class Vault:
             raise VaultError("La tarea debe ocupar una sola línea")
         if due is not ... and due is not None:
             date.fromisoformat(str(due))
-        replace_item_line(doc, item, self._line_for_item(item, text=text.strip() if text else None, due=due))
-        return item.ident or ""
+        raw, ident = self._patch_item_raw(item, text=text.strip() if text else None, due=due)
+        replace_item_line(doc, item, raw)
+        return ident
 
     def set_task_state(self, selector: str, checked: bool, project: str | None = None) -> str:
         doc, item = self._select(selector, project, True)
