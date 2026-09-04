@@ -176,7 +176,9 @@ class Vault:
         doc = parse_document(path)
         if any(exact_wikilink(line, target) for line in doc.lines):
             return
-        header = doc.section(header_name)
+        header = doc.section(header_name) or (
+            doc.section(header_name[2:-2]) if header_name.startswith("[[") and header_name.endswith("]]") else None
+        )
         lines = doc.lines.copy()
         if header is None:
             if lines and lines[-1].strip():
@@ -486,11 +488,17 @@ class Vault:
         wanted = normalize(title) if title else None
         for doc in docs:
             name = "General" if doc.path == self.config.general_path else doc.path.stem
-            headers = [header for header in doc.headers if wanted is None or normalize(header.text) == wanted]
-            for header in headers:
+            sections: list[tuple[str, list[Item]]] = []
+            general_items = [item for item in doc.items if item.title == "General"]
+            if general_items and (wanted is None or wanted == normalize("General")):
+                sections.append(("General", general_items))
+            for header in doc.headers:
                 if header.level == 1 and normalize(header.text) == normalize(doc.path.stem):
                     continue
-                for item in doc.section_items(header):
+                if wanted is None or normalize(header.text) == wanted:
+                    sections.append((header.text, doc.section_items(header)))
+            for heading, items in sections:
+                for item in items:
                     if item.checked is True and not include_done:
                         continue
                     parsed: date | None = None
@@ -504,7 +512,7 @@ class Vault:
                     if temporal and (parsed is None or (start and parsed < start) or (until and parsed > until)):
                         if not (item.due is None and include_undated):
                             continue
-                    results.append(SummaryEntry(header.text, name, item.text, item.checked, item.due, invalid))
-                if wanted and not doc.section_items(header):
-                    results.append(SummaryEntry(header.text, name, "", None, None, False))
+                    results.append(SummaryEntry(heading, name, item.text, item.checked, item.due, invalid))
+                if wanted and not items:
+                    results.append(SummaryEntry(heading, name, "", None, None, False))
         return results

@@ -142,6 +142,24 @@ def test_archive_removes_numbered_exact_index_entry(configured: tuple[Path, Vaul
     assert "[[Proyecto 1]]" not in general.read_text(encoding="utf-8")
 
 
+
+
+def test_project_index_accepts_bare_client_heading(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
+    store.create_client("ERIC", {})
+    general = root / "General.md"
+    general.write_text("# General\n\n## ERIC\n", encoding="utf-8")
+    store.create_project("Proyecto 1", "ERIC", [])
+    text = general.read_text(encoding="utf-8")
+    assert text.count("## ERIC") == 1
+    assert "- [[Proyecto 1]]" in text
+
+
+def test_summary_includes_items_before_first_heading(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
+    (root / "General.md").write_text("# General\n\n- [ ] Sin título 📅 2026-10-30\n", encoding="utf-8")
+    entries = store.summaries("General", start=date(2026, 10, 1), until=date(2026, 10, 31))
+    assert [(entry.title, entry.text) for entry in entries] == [("General", "Sin título")]
 def test_task_state_changes_only_checkbox_character_with_crlf(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     general = root / "General.md"
