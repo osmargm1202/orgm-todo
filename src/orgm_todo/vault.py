@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import calendar
 import re
 from dataclasses import dataclass
@@ -205,41 +204,6 @@ class Vault:
         if lines != doc.lines:
             doc.replace(lines)
 
-    def _archive_index_link(self, path: Path, target: str) -> bool:
-        doc = parse_document(path)
-        lines = doc.lines.copy()
-        changed = False
-        for index, line in enumerate(lines):
-            if exact_wikilink(line, target):
-                encoded = base64.urlsafe_b64encode(line.encode("utf-8")).decode("ascii")
-                ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
-                lines[index] = f"<!-- orgm-todo:archived-index {encoded} -->{ending}"
-                changed = True
-        if changed:
-            doc.replace(lines)
-        return changed
-
-    def _restore_index_link(self, path: Path, target: str) -> bool:
-        doc = parse_document(path)
-        lines = doc.lines.copy()
-        existing = any(exact_wikilink(line, target) for line in lines)
-        changed = restored = False
-        for index, line in enumerate(lines):
-            marker = re.fullmatch(r"[ \t]*<!-- orgm-todo:archived-index ([A-Za-z0-9_-]+=*) -->\r?\n?", line)
-            if marker is None:
-                continue
-            try:
-                original = base64.urlsafe_b64decode(marker.group(1)).decode("utf-8")
-            except (UnicodeDecodeError, ValueError):
-                continue
-            if not exact_wikilink(original, target):
-                continue
-            lines[index] = "" if existing else original
-            existing = True
-            changed = restored = True
-        if changed:
-            doc.replace(lines)
-        return restored
 
     def _client_for_project(self, project: str) -> str:
         path = self._named_file("projects", project)
@@ -299,10 +263,9 @@ class Vault:
         if destination.exists():
             raise VaultError(f"Ya existe en el baúl: {source.stem}")
         client = self._client_for_project(source.stem)
-        client_path = self._named_file("clients", client)
-        self._archive_index_link(self.config.general_path, source.stem)
-        self._archive_index_link(client_path, source.stem)
         source.replace(destination)
+        self._remove_link(self.config.general_path, source.stem)
+        self._remove_link(self._named_file("clients", client), source.stem)
 
     def restore_project(self, name: str) -> None:
         source = self._named_file("archive_projects", name)
@@ -321,10 +284,8 @@ class Vault:
             raise VaultError("Proyecto archivado sin Cliente válido")
         client_path = self._named_file("clients", client)
         source.replace(destination)
-        if not self._restore_index_link(self.config.general_path, destination.stem):
-            self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
-        if not self._restore_index_link(client_path, destination.stem):
-            self._add_link(client_path, "Proyectos", destination.stem)
+        self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
+        self._add_link(client_path, "Proyectos", destination.stem)
 
     def archive_client(self, name: str) -> None:
         source = self._named_file("clients", name)

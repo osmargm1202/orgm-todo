@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from orgm_todo.cli import app
 from orgm_todo.config import ConfigError, config_path, initialize, load_config
 from orgm_todo.markdown import MarkdownError, parse_document
+from orgm_todo.menu import Menu
 from orgm_todo.vault import Vault, VaultError
 
 runner = CliRunner()
@@ -77,10 +78,10 @@ def test_parser_preserves_frontmatter_crlf_and_detects_concurrent_change(tmp_pat
 def test_parser_ignores_mixed_fence_delimiters(tmp_path: Path) -> None:
     path = tmp_path / "Documento.md"
     path.write_text(
-        "# Documento\n\n~~~python\n``` literal\n- [ ] Ignorada\n~~~~\n\n## Pendiente\n- [ ] Activa\n",
+        "# Documento\n\n`texto`\n~~texto~~\n- [ ] Antes\n\n~~~python\n``` literal\n- [ ] Ignorada\n~~~~\n\n## Pendiente\n- [ ] Activa\n",
         encoding="utf-8",
     )
-    assert [item.text for item in parse_document(path).items] == ["Activa"]
+    assert [item.text for item in parse_document(path).items] == ["Antes", "Activa"]
 
 
 def test_client_project_indexes_and_archive_restore(configured: tuple[Path, Vault]) -> None:
@@ -89,16 +90,17 @@ def test_client_project_indexes_and_archive_restore(configured: tuple[Path, Vaul
     store.create_project("Proyecto 1", "ERIC", ["Correcciones"])
     store.update_project("Proyecto 1", status="En pausa")
     general, client, project = root / "General.md", root / "ORGM/Clientes/ERIC.md", root / "ORGM/Proyectos/Proyecto 1.md"
-    before_general, before_client, before_project = general.read_bytes(), client.read_bytes(), project.read_bytes()
+    before_project = project.read_bytes()
     with pytest.raises(VaultError, match="proyectos activos"):
         store.archive_client("ERIC")
     store.archive_project("Proyecto 1")
     assert not project.exists()
     assert "[[Proyecto 1]]" not in general.read_text(encoding="utf-8")
+    assert "orgm-todo:archived-index" not in general.read_text(encoding="utf-8")
     store.restore_project("Proyecto 1")
     assert project.read_bytes() == before_project
-    assert general.read_bytes() == before_general
-    assert client.read_bytes() == before_client
+    assert "- [[Proyecto 1]]" in general.read_text(encoding="utf-8")
+    assert "- [[Proyecto 1]]" in client.read_text(encoding="utf-8")
 
 
 def test_tasks_manual_notes_selectors_moves_and_recurrence(configured: tuple[Path, Vault]) -> None:
@@ -296,3 +298,28 @@ def test_cli_exposes_only_english_command_names() -> None:
     assert "client" in help_output.output and "summary" in help_output.output
     assert "cliente" not in help_output.output and "resumen" not in help_output.output
     assert runner.invoke(app, ["cliente", "--help"]).exit_code != 0
+
+
+class ScriptedPrompter:
+    def __init__(self, selections: list[str | None], texts: list[str | None] = []):
+        self.selections = selections
+        self.texts = texts
+
+    def select(self, message: str, choices: list[str]) -> str | None:
+        return self.selections.pop(0)
+
+    def text(self, message: str, default: str = "") -> str | None:
+        return self.texts.pop(0) if self.texts else default
+
+    def confirm(self, message: str, default: bool = False) -> bool | None:
+        return default
+
+
+def test_interactive_menu_returns_to_current_menu_and_escape(configured: tuple[Path, Vault]) -> None:
+    _, store = configured
+    prompter = ScriptedPrompter(["Clients", "List", "Back", "Exit"], [""])
+    Menu(prompter=prompter).run()
+    assert prompter.selections == []
+    escaped = ScriptedPrompter(["Clients", None, "Exit"])
+    Menu(prompter=escaped).run()
+    assert escaped.selections == []

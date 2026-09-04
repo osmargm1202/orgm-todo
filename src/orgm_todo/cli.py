@@ -14,6 +14,7 @@ from rich.table import Table
 
 from .config import ConfigError, config_path, initialize, load_config, save_config
 from .markdown import MarkdownError
+from .menu import run_interactive
 from .vault import Entry, SummaryEntry, Vault, VaultError
 
 app = typer.Typer(no_args_is_help=True, help="Seguimiento ORGM directamente sobre notas Obsidian.")
@@ -88,6 +89,12 @@ def init(vault_path: Annotated[Path | None, typer.Option("--vault")] = None) -> 
     except ConfigError as exc:
         fail(exc)
     console.print(f"Vault configurado: [bold]{escape(str(config.vault))}[/bold]")
+
+
+@app.command("menu")
+def menu() -> None:
+    """Open the interactive Questionary menu."""
+    run_interactive()
 
 
 @config_app.command("show")

@@ -124,14 +124,14 @@ def _ignored_lines(lines: list[str]) -> set[int]:
     for index, line in enumerate(lines):
         if index in ignored:
             continue
-        opening = re.match(r"^[ \t]*(`+|~+)", line)
+        opening = re.match(r"^[ \t]*(`{3,}|~{3,})", line)
         if fence is None:
             if opening:
                 fence = (opening.group(1)[0], len(opening.group(1)))
                 ignored.add(index)
             continue
         ignored.add(index)
-        closing = re.match(r"^[ \t]*(`+|~+)[ \t]*(?:\r?\n)?$", line)
+        closing = re.match(r"^[ \t]*(`{3,}|~{3,})[ \t]*(?:\r?\n)?$", line)
         if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= fence[1]:
             fence = None
     return ignored

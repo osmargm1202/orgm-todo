@@ -29,13 +29,21 @@ orgm-todo config set-vault /path/to/another-vault
 - `General.md` es un índice manual de áreas, clientes y proyectos. Sus enlaces `[[...]]` **no** aparecen en `summary`.
 - Cada proyecto activo vive en `ORGM/Proyectos/` y conserva notas, datos y tareas Markdown editables directamente en Obsidian.
 - Solo una casilla pendiente `- [ ]` es una tarea visible en `summary`. Las notas y las casillas `- [x]` no aparecen allí.
-- Archivar mueve el proyecto a `ORGM/Baul/Proyectos/` y oculta sus enlaces. Restaurar devuelve la nota y los índices de `General.md` y del cliente exactamente a su posición y formato originales.
+- Archivar mueve el proyecto a `ORGM/Baul/Proyectos/` y oculta sus enlaces. Restaurar devuelve la nota íntegra y vuelve a indexarla bajo su cliente en `General.md` y en la nota del cliente.
 
 El parser respeta BOM, LF/CRLF, frontmatter, fences Markdown, indentación, listas, IDs y valores de tabla escapados. Las mutaciones usan reemplazo atómico y detectan cambios concurrentes.
 
 ## Commands
 
 Todos los comandos y opciones de la CLI están en inglés.
+
+### Interactive menu
+
+```sh
+orgm-todo menu
+```
+
+El menú Questionary expone clientes, proyectos, títulos, notas, tareas, resumen y configuración. Cada operación solicita sus datos, muestra mensajes de resultado y vuelve al submenú desde el que se inició. `Esc` cancela el prompt actual y vuelve al menú anterior; `Exit` cierra la interfaz.
 
 ### Clients
 
