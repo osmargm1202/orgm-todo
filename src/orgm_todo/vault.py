@@ -108,8 +108,15 @@ class Vault:
             return None
         start, end = doc.section_bounds(section)
         first = next((i for i in range(start + 1, end) if doc.lines[i].strip()), None)
-        if first is None or "|" not in doc.lines[first] or first + 1 >= end or "|" not in doc.lines[first + 1]:
+        if first is None or "|" not in doc.lines[first]:
             return None
+        if first + 1 >= end or "|" not in doc.lines[first + 1]:
+            raise VaultError("Tabla mal formada")
+        header_cells, separator_cells = Vault._cells(doc.lines[first]), Vault._cells(doc.lines[first + 1])
+        if len(header_cells) != 2 or len(separator_cells) != 2 or not all(
+            re.fullmatch(r":?-{3,}:?", cell) for cell in separator_cells
+        ):
+            raise VaultError("Tabla mal formada")
         table_end = first + 2
         while table_end < end and doc.lines[table_end].lstrip().startswith("|"):
             table_end += 1
@@ -120,7 +127,7 @@ class Vault:
         raw = line.strip()
         if not raw.startswith("|") or not raw.endswith("|"):
             raise VaultError("Tabla mal formada")
-        return [cell.strip().replace("\\|", "|") for cell in raw[1:-1].split("|")]
+        return [cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", raw[1:-1])]
 
     def _update_fields(self, path: Path, set_fields: dict[str, str], remove_fields: set[str]) -> None:
         doc = parse_document(path)

@@ -36,6 +36,17 @@ def test_initialize_preserves_manual_agents_and_only_creates_missing(configured:
     assert (root / "General.md").read_text(encoding="utf-8") == "# General\n\n## Pendiente\n"
 
 
+def test_initialize_appends_managed_agents_without_changing_manual_bytes(configured: tuple[Path, Vault]) -> None:
+    root, _ = configured
+    agents = root / "AGENTS.md"
+    manual = "Reglas manuales\n\n\n"
+    agents.write_text(manual, encoding="utf-8")
+    initialize(root)
+    content = agents.read_text(encoding="utf-8")
+    assert content.startswith(manual)
+    assert content[len(manual) :].startswith("\n\n<!-- orgm-todo:start -->")
+
+
 def test_parser_preserves_frontmatter_crlf_and_detects_concurrent_change(tmp_path: Path) -> None:
     path = tmp_path / "Documento.md"
     original = "---\r\ntitle: x\r\n---\r\n# Documento\r\n\r\n## Título\r\n- [X] tarea 📅 2026-02-01\r\n"
@@ -129,15 +140,13 @@ def test_cli_init_and_task_commands_use_isolated_config(tmp_path: Path, monkeypa
     assert result.output.count("orgm-") == 3
 
 
-def test_archive_removes_numbered_exact_index_entry(configured: tuple[Path, Vault]) -> None:
+def test_numbered_preexisting_index_is_not_duplicated_and_is_removed(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     store.create_client("ERIC", {})
-    store.create_project("Proyecto 1", "ERIC", [])
     general = root / "General.md"
-    general.write_text(
-        general.read_text(encoding="utf-8").replace("- [[Proyecto 1]]", "1. [[Proyecto 1]]"),
-        encoding="utf-8",
-    )
+    general.write_text("# General\n\n## [[ERIC]]\n\n1. [[Proyecto 1]]\n", encoding="utf-8")
+    store.create_project("Proyecto 1", "ERIC", [])
+    assert general.read_text(encoding="utf-8").count("[[Proyecto 1]]") == 1
     store.archive_project("Proyecto 1")
     assert "[[Proyecto 1]]" not in general.read_text(encoding="utf-8")
 
@@ -168,3 +177,18 @@ def test_task_state_changes_only_checkbox_character_with_crlf(configured: tuple[
     store.set_task_state("orgm-12345678", False)
     expected = original.replace("[X]", "[ ]")
     assert general.read_bytes() == expected.encode("utf-8")
+
+
+def test_data_table_supports_escaped_pipes_and_rejects_malformed_without_writing(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
+    store.create_client("ERIC", {"Empresa": "A|B"})
+    path = root / "ORGM/Clientes/ERIC.md"
+    store.update_client("ERIC", {"Teléfono": "809-555-0100"}, set())
+    content = path.read_text(encoding="utf-8")
+    assert "| Empresa | A\\|B |" in content
+    assert "| Teléfono | 809-555-0100 |" in content
+    path.write_text("# ERIC\n\n## Datos\n\n| Campo | Valor |\n| --- |\n| Empresa | A\\|B |\n", encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(VaultError, match="Tabla mal formada"):
+        store.update_client("ERIC", {"Teléfono": "809-555-0100"}, set())
+    assert path.read_bytes() == before

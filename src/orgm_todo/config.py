@@ -144,7 +144,8 @@ def _update_agents(path: Path) -> None:
     elif start != -1 or end != -1:
         raise ConfigError(f"Bloque administrado ambiguo en {path}")
     elif old:
-        new = old.rstrip("\n") + "\n\n" + MANAGED_AGENTS
+        newline = "\r\n" if "\r\n" in old else "\n"
+        new = old + newline * 2 + MANAGED_AGENTS
     else:
         new = MANAGED_AGENTS
     if new != old:
