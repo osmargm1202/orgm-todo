@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from orgm_todo.cli import app
-from orgm_todo.config import initialize, load_config
+from orgm_todo.config import ConfigError, config_path, initialize, load_config
 from orgm_todo.markdown import MarkdownError, parse_document
 from orgm_todo.vault import Vault, VaultError
 
@@ -45,6 +45,21 @@ def test_initialize_appends_managed_agents_without_changing_manual_bytes(configu
     content = agents.read_text(encoding="utf-8")
     assert content.startswith(manual)
     assert content[len(manual) :].startswith("\n\n<!-- orgm-todo:start -->")
+
+
+def test_load_config_rejects_escaping_and_symlinked_paths(configured: tuple[Path, Vault]) -> None:
+    root, _ = configured
+    saved = config_path()
+    original = saved.read_text(encoding="utf-8")
+    saved.write_text(original.replace('projects = "ORGM/Proyectos"', 'projects = "../../outside"'), encoding="utf-8")
+    with pytest.raises(ConfigError, match="no permitida"):
+        load_config()
+    outside = root.parent / "outside"
+    outside.mkdir()
+    (root / "ORGM/escape").symlink_to(outside, target_is_directory=True)
+    saved.write_text(original.replace('projects = "ORGM/Proyectos"', 'projects = "ORGM/escape"'), encoding="utf-8")
+    with pytest.raises(ConfigError, match="fuera del vault"):
+        load_config()
 
 
 def test_parser_preserves_frontmatter_crlf_and_detects_concurrent_change(tmp_path: Path) -> None:

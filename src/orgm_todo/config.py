@@ -43,12 +43,27 @@ class VaultConfig:
     archive_projects: str = DEFAULTS["archive_projects"]
     archive_clients: str = DEFAULTS["archive_clients"]
 
+    def __post_init__(self) -> None:
+        root = self.vault.resolve()
+        object.__setattr__(self, "vault", root)
+        for key in DEFAULTS:
+            self._resolve_target(getattr(self, key))
+
+    def _resolve_target(self, relative: str) -> Path:
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts:
+            raise ConfigError(f"Ruta configurada no permitida: {relative}")
+        target = (self.vault / path).resolve(strict=False)
+        if not target.is_relative_to(self.vault):
+            raise ConfigError(f"Ruta configurada fuera del vault: {relative}")
+        return target
+
     @property
     def general_path(self) -> Path:
-        return self.vault / self.general
+        return self._resolve_target(self.general)
 
     def path(self, key: str) -> Path:
-        return self.vault / getattr(self, key)
+        return self._resolve_target(getattr(self, key))
 
 
 def config_path() -> Path:
@@ -127,7 +142,12 @@ def load_config() -> VaultConfig:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         root = validate_vault(data["vault"])
-        values = {key: str(data.get(key, default)) for key, default in DEFAULTS.items()}
+        values: dict[str, str] = {}
+        for key, default in DEFAULTS.items():
+            value = data.get(key, default)
+            if not isinstance(value, str):
+                raise ConfigError(f"Ruta configurada inválida: {key}")
+            values[key] = value
     except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, ConfigError) as exc:
         if isinstance(exc, ConfigError):
             raise
