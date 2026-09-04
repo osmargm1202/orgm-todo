@@ -28,6 +28,7 @@ app.add_typer(proyecto_app, name="proyecto")
 app.add_typer(titulo_app, name="titulo")
 app.add_typer(nota_app, name="nota")
 app.add_typer(tarea_app, name="tarea")
+app.add_typer(config_app, name="config")
 console = Console()
 error_console = Console(stderr=True)
 

@@ -169,6 +169,20 @@ def test_cli_normalizes_duplicate_client_fields(tmp_path: Path, monkeypatch: pyt
     assert not (root / "ORGM/Clientes/CONFLICTO.md").exists()
 
 
+
+def test_cli_config_show_and_change_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    first, second = tmp_path / "primero", tmp_path / "segundo"
+    (first / ".obsidian").mkdir(parents=True)
+    (second / ".obsidian").mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert runner.invoke(app, ["init", "--vault", str(first)]).exit_code == 0
+    shown = runner.invoke(app, ["config", "mostrar"])
+    assert shown.exit_code == 0 and f"vault = {first}" in shown.output
+    changed = runner.invoke(app, ["config", "vault", str(second)])
+    assert changed.exit_code == 0, changed.output
+    shown = runner.invoke(app, ["config", "mostrar"])
+    assert shown.exit_code == 0 and f"vault = {second}" in shown.output
+
 def test_numbered_preexisting_index_is_not_duplicated_and_is_removed(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     store.create_client("ERIC", {})
