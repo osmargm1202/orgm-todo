@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 from pathlib import Path
-
+import subprocess
+import sys
+import time
 import pytest
 from typer.testing import CliRunner
 
@@ -90,17 +93,19 @@ def test_client_project_indexes_and_archive_restore(configured: tuple[Path, Vaul
     store.create_project("Proyecto 1", "ERIC", ["Correcciones"])
     store.update_project("Proyecto 1", status="En pausa")
     general, client, project = root / "General.md", root / "ORGM/Clientes/ERIC.md", root / "ORGM/Proyectos/Proyecto 1.md"
-    before_project = project.read_bytes()
+    before_general, before_client, before_project = general.read_bytes(), client.read_bytes(), project.read_bytes()
     with pytest.raises(VaultError, match="proyectos activos"):
         store.archive_client("ERIC")
     store.archive_project("Proyecto 1")
-    assert not project.exists()
+    archived = root / "ORGM/Baul/Proyectos/Proyecto 1.md"
+    assert archived.read_bytes() == before_project
     assert "[[Proyecto 1]]" not in general.read_text(encoding="utf-8")
-    assert "orgm-todo:archived-index" not in general.read_text(encoding="utf-8")
+    assert (root / "ORGM/Baul/Proyectos/.orgm-todo-index.json").is_file()
     store.restore_project("Proyecto 1")
     assert project.read_bytes() == before_project
-    assert "- [[Proyecto 1]]" in general.read_text(encoding="utf-8")
-    assert "- [[Proyecto 1]]" in client.read_text(encoding="utf-8")
+    assert general.read_bytes() == before_general
+    assert client.read_bytes() == before_client
+    assert not (root / "ORGM/Baul/Proyectos/.orgm-todo-index.json").exists()
 
 
 def test_tasks_manual_notes_selectors_moves_and_recurrence(configured: tuple[Path, Vault]) -> None:
@@ -323,3 +328,21 @@ def test_interactive_menu_returns_to_current_menu_and_escape(configured: tuple[P
     escaped = ScriptedPrompter(["Clients", None, "Exit"])
     Menu(prompter=escaped).run()
     assert escaped.selections == []
+
+
+def test_questionary_escape_returns_none_over_pty() -> None:
+    master, slave = os.openpty()
+    command = (
+        "from orgm_todo.menu import Prompter; import sys; "
+        "sys.exit(0 if Prompter().select('Choose', ['One', 'Exit']) is None else 1)"
+    )
+    process = subprocess.Popen([sys.executable, "-c", command], stdin=slave, stdout=slave, stderr=slave)
+    os.close(slave)
+    try:
+        time.sleep(0.2)
+        os.write(master, b"\x1b")
+        assert process.wait(timeout=5) == 0
+    finally:
+        os.close(master)
+        if process.poll() is None:
+            process.kill()

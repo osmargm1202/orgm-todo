@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import calendar
+import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -204,6 +208,88 @@ class Vault:
         if lines != doc.lines:
             doc.replace(lines)
 
+    def _capture_index_links(self, path: Path, target: str, scope: str) -> list[dict[str, object]]:
+        doc = parse_document(path)
+        return [
+            {
+                "scope": scope,
+                "index": index,
+                "line": base64.urlsafe_b64encode(line.encode("utf-8")).decode("ascii"),
+            }
+            for index, line in enumerate(doc.lines)
+            if exact_wikilink(line, target)
+        ]
+
+    def _archive_index_path(self) -> Path:
+        return self._directory("archive_projects") / ".orgm-todo-index.json"
+
+    def _read_archive_indexes(self) -> dict[str, list[dict[str, object]]]:
+        path = self._archive_index_path()
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise VaultError(f"Metadatos de archivo inválidos en {path}") from exc
+        if not isinstance(data, dict) or not all(isinstance(key, str) and isinstance(value, list) for key, value in data.items()):
+            raise VaultError(f"Metadatos de archivo inválidos en {path}")
+        return data
+
+    def _write_archive_indexes(self, indexes: dict[str, list[dict[str, object]]]) -> None:
+        path = self._archive_index_path()
+        if not indexes:
+            path.unlink(missing_ok=True)
+            return
+        encoded = json.dumps(indexes, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".orgm-todo-index.", delete=False) as temporary:
+            temporary.write(encoded)
+            temporary_path = Path(temporary.name)
+        try:
+            os.replace(temporary_path, path)
+        except Exception:
+            temporary_path.unlink(missing_ok=True)
+            raise
+
+    def _store_archive_metadata(self, project_file: str, records: list[dict[str, object]]) -> None:
+        if not records:
+            return
+        indexes = self._read_archive_indexes()
+        if project_file in indexes:
+            raise VaultError(f"Metadatos de archivo duplicados para {project_file}")
+        indexes[project_file] = records
+        self._write_archive_indexes(indexes)
+
+    def _take_archive_metadata(self, project_file: str) -> list[dict[str, object]]:
+        indexes = self._read_archive_indexes()
+        records = indexes.pop(project_file, [])
+        self._write_archive_indexes(indexes)
+        return records
+
+    def _restore_index_links(self, path: Path, target: str, scope: str, records: list[dict[str, object]]) -> bool:
+        selected = [record for record in records if record.get("scope") == scope]
+        if not selected:
+            return False
+        doc = parse_document(path)
+        if any(exact_wikilink(line, target) for line in doc.lines):
+            return True
+        lines = doc.lines.copy()
+        offset = 0
+        restored = False
+        for record in sorted(selected, key=lambda item: int(item["index"])):
+            try:
+                line = base64.urlsafe_b64decode(str(record["line"])).decode("utf-8")
+                index = int(record["index"])
+            except (KeyError, UnicodeDecodeError, ValueError) as exc:
+                raise VaultError("Metadatos de archivo inválidos") from exc
+            if not exact_wikilink(line, target):
+                raise VaultError("Metadatos de archivo inválidos")
+            lines.insert(min(max(index + offset, 0), len(lines)), line)
+            offset += 1
+            restored = True
+        if restored:
+            doc.replace(lines)
+        return restored
+
 
     def _client_for_project(self, project: str) -> str:
         path = self._named_file("projects", project)
@@ -263,9 +349,15 @@ class Vault:
         if destination.exists():
             raise VaultError(f"Ya existe en el baúl: {source.stem}")
         client = self._client_for_project(source.stem)
+        client_path = self._named_file("clients", client)
+        records = [
+            *self._capture_index_links(self.config.general_path, source.stem, "general"),
+            *self._capture_index_links(client_path, source.stem, "client"),
+        ]
+        self._store_archive_metadata(source.name, records)
         source.replace(destination)
         self._remove_link(self.config.general_path, source.stem)
-        self._remove_link(self._named_file("clients", client), source.stem)
+        self._remove_link(client_path, source.stem)
 
     def restore_project(self, name: str) -> None:
         source = self._named_file("archive_projects", name)
@@ -283,9 +375,12 @@ class Vault:
         if not client:
             raise VaultError("Proyecto archivado sin Cliente válido")
         client_path = self._named_file("clients", client)
+        records = self._take_archive_metadata(source.name)
         source.replace(destination)
-        self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
-        self._add_link(client_path, "Proyectos", destination.stem)
+        if not self._restore_index_links(self.config.general_path, destination.stem, "general", records):
+            self._add_link(self.config.general_path, f"[[{client}]]", destination.stem)
+        if not self._restore_index_links(client_path, destination.stem, "client", records):
+            self._add_link(client_path, "Proyectos", destination.stem)
 
     def archive_client(self, name: str) -> None:
         source = self._named_file("clients", name)

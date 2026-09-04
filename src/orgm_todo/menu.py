@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Callable
 
 import questionary
+from prompt_toolkit.keys import Keys
 from rich.console import Console
 from rich.table import Table
 
@@ -19,6 +20,12 @@ class Prompter:
 
     @staticmethod
     def _ask(prompt: object) -> object | None:
+        application = prompt.application  # type: ignore[union-attr]
+
+        @application.key_bindings.add(Keys.Escape)
+        def cancel(event: object) -> None:
+            event.app.exit(result=None)  # type: ignore[union-attr]
+
         try:
             return prompt.ask()  # type: ignore[union-attr]
         except (EOFError, KeyboardInterrupt):
