@@ -192,3 +192,23 @@ def test_data_table_supports_escaped_pipes_and_rejects_malformed_without_writing
     with pytest.raises(VaultError, match="Tabla mal formada"):
         store.update_client("ERIC", {"Teléfono": "809-555-0100"}, set())
     assert path.read_bytes() == before
+
+
+def test_move_and_delete_include_indented_task_continuations(configured: tuple[Path, Vault]) -> None:
+    root, store = configured
+    general = root / "General.md"
+    general.write_text(
+        "# General\n\n## Origen\n- [ ] Mover ^orgm-11111111\n  detalle manual\n\n  segundo detalle\n"
+        "- [ ] Eliminar ^orgm-22222222\n    detalle eliminado\n\n    segundo eliminado\n"
+        "- [ ] Conservar ^orgm-33333333\n\n## Destino\n",
+        encoding="utf-8",
+    )
+    store.move_item("orgm-11111111", "Destino", task=True)
+    moved = general.read_text(encoding="utf-8")
+    assert "## Origen\n- [ ] Eliminar" in moved
+    assert "## Destino\n- [ ] Mover ^orgm-11111111\n  detalle manual\n\n  segundo detalle\n" in moved
+    store.delete_item("orgm-22222222", task=True)
+    deleted = general.read_text(encoding="utf-8")
+    assert "Eliminar" not in deleted
+    assert "detalle eliminado" not in deleted
+    assert "- [ ] Conservar ^orgm-33333333" in deleted

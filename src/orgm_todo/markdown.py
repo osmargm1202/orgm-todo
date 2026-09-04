@@ -163,13 +163,17 @@ def parse_document(path: str | Path) -> Document:
         title = prior[-1].text if prior else "General"
         end = index + 1
         indent = len(match.group("indent").expandtabs(4))
-        while end < len(lines):
-            next_match = ITEM_RE.match(lines[end])
-            if lines[end].strip() and (not next_match or len(next_match.group("indent").expandtabs(4)) <= indent):
+        cursor = end
+        while cursor < len(lines):
+            continuation = lines[cursor]
+            if not continuation.strip():
+                cursor += 1
+                continue
+            leading = continuation[: len(continuation) - len(continuation.lstrip(" \t"))]
+            if len(leading.expandtabs(4)) <= indent:
                 break
-            if next_match and len(next_match.group("indent").expandtabs(4)) <= indent:
-                break
-            end += 1
+            end = cursor + 1
+            cursor += 1
         body = match.group("body").rstrip("\r\n")
         ident_match = ID_RE.search(body)
         ident = ident_match.group(1).lower() if ident_match else None
