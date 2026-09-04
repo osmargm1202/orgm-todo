@@ -28,12 +28,12 @@ app.add_typer(proyecto_app, name="proyecto")
 app.add_typer(titulo_app, name="titulo")
 app.add_typer(nota_app, name="nota")
 app.add_typer(tarea_app, name="tarea")
-app.add_typer(config_app, name="config")
 console = Console()
+error_console = Console(stderr=True)
 
 
 def fail(error: Exception) -> None:
-    console.print(f"[red]{escape(str(error))}[/red]", stderr=True)
+    error_console.print(f"[red]{escape(str(error))}[/red]")
     raise typer.Exit(1)
 
 
@@ -54,21 +54,29 @@ def run(fn):
 def fields_from(
     data: list[str], empresa: str | None, contacto: str | None, telefono: str | None, correo: str | None, direccion: str | None
 ) -> dict[str, str]:
-    fields: dict[str, str] = {}
+    fields: dict[str, tuple[str, str]] = {}
+
+    def add(key: str, value: str) -> None:
+        display = key.strip()
+        if not display:
+            raise VaultError("--dato requiere un campo")
+        normalized = " ".join(display.split()).casefold()
+        existing = fields.get(normalized)
+        if existing is not None:
+            if existing[1] != value:
+                raise VaultError(f"Campo duplicado: {display}")
+            return
+        fields[normalized] = (display, value)
+
     for pair in data:
         if "=" not in pair:
             raise VaultError("--dato debe tener formato CAMPO=VALOR")
         key, value = pair.split("=", 1)
-        if not key.strip():
-            raise VaultError("--dato requiere un campo")
-        normalized = " ".join(key.split()).casefold()
-        if normalized in {" ".join(x.split()).casefold() for x in fields} and fields.get(key) != value:
-            raise VaultError(f"Campo duplicado: {key}")
-        fields[key] = value
+        add(key, value)
     for key, value in {"Empresa": empresa, "Contacto": contacto, "Teléfono": telefono, "Correo": correo, "Dirección": direccion}.items():
         if value is not None:
-            fields[key] = value
-    return fields
+            add(key, value)
+    return {key: value for key, value in fields.values()}
 
 
 @app.command()

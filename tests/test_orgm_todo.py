@@ -155,6 +155,20 @@ def test_cli_init_and_task_commands_use_isolated_config(tmp_path: Path, monkeypa
     assert result.output.count("orgm-") == 3
 
 
+def test_cli_normalizes_duplicate_client_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "vault"
+    (root / ".obsidian").mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert runner.invoke(app, ["init", "--vault", str(root)]).exit_code == 0
+    equal = runner.invoke(app, ["cliente", "crear", "ERIC", "--dato", "Correo=x", "--dato", " correo =x"])
+    assert equal.exit_code == 0, equal.output
+    assert (root / "ORGM/Clientes/ERIC.md").read_text(encoding="utf-8").count("| Correo | x |") == 1
+    conflict = runner.invoke(app, ["cliente", "crear", "CONFLICTO", "--dato", "Correo=x", "--correo", "y"])
+    assert conflict.exit_code == 1
+    assert "Campo duplicado" in conflict.output
+    assert not (root / "ORGM/Clientes/CONFLICTO.md").exists()
+
+
 def test_numbered_preexisting_index_is_not_duplicated_and_is_removed(configured: tuple[Path, Vault]) -> None:
     root, store = configured
     store.create_client("ERIC", {})
