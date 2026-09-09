@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -175,6 +176,34 @@ def test_cli_init_and_task_commands_use_isolated_config(tmp_path: Path, monkeypa
     result = runner.invoke(app, ["task", "add", "Informe", "--project", "Proyecto 1", "--title", "Correcciones", "--every", "month", "--from", "2026-09-30", "--to", "2026-11-30"])
     assert result.exit_code == 0, result.output
     assert result.output.count("orgm-") == 3
+
+
+def test_cli_general_note_lifecycle_uses_general_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "vault"
+    (root / ".obsidian").mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    initialized = runner.invoke(app, ["init", "--vault", str(root)])
+    assert initialized.exit_code == 0, initialized.output
+    general = root / "General.md"
+    original = general.read_text(encoding="utf-8")
+
+    added = runner.invoke(app, ["note", "add", "Nota para todos"])
+    assert added.exit_code == 0, added.output
+    match = re.search(r"\borgm-[0-9a-f]{8}\b", added.output)
+    assert match is not None, added.output
+    ident = match.group()
+    assert f"- Nota para todos ^{ident}" in general.read_text(encoding="utf-8")
+
+    listed = runner.invoke(app, ["note", "list"])
+    assert listed.exit_code == 0, listed.output
+    assert "General / Pendiente: Nota para todos" in listed.output
+
+    deleted = runner.invoke(app, ["note", "delete", ident])
+    assert deleted.exit_code == 0, deleted.output
+    listed = runner.invoke(app, ["note", "list"])
+    assert listed.exit_code == 0, listed.output
+    assert "Nota para todos" not in listed.output
+    assert general.read_text(encoding="utf-8") == original
 
 
 def test_cli_normalizes_duplicate_client_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

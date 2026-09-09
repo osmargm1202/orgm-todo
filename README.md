@@ -4,6 +4,24 @@ CLI para seguimiento ORGM directamente sobre un vault de Obsidian. Markdown es l
 
 ## Installation
 
+Requiere Python 3.13+ y [uv](https://docs.astral.sh/uv/).
+
+Versión estable desde PyPI (disponible después de la primera publicación):
+
+```sh
+uv tool install orgm-todo
+```
+
+Actualizar:
+
+```sh
+uv tool upgrade orgm-todo
+```
+
+### Versión de desarrollo
+
+Instalar directamente desde Git:
+
 ```sh
 uv tool install git+https://github.com/osmargm1202/orgm-todo.git
 ```
@@ -13,6 +31,20 @@ Actualizar o reinstalar:
 ```sh
 uv tool install --force git+https://github.com/osmargm1202/orgm-todo.git
 ```
+
+## Quick start
+
+Usa un vault de Obsidian existente, con su directorio `.obsidian/`:
+
+```sh
+orgm-todo init --vault /path/to/vault
+orgm-todo menu
+orgm-todo --help
+```
+
+Continúa con [clientes](#clients), [proyectos y títulos](#projects-and-titles),
+[notas y tareas](#notes-and-tasks), [recurrencia](#recurrence) o [resumen](#summary).
+Para cambiar el vault, consulta [configuración](#setup).
 
 ## Setup
 
@@ -79,6 +111,25 @@ orgm-todo title delete "HVAC corrections" --project "New project" --force
 
 Sin `--project`, estos comandos operan sobre `General.md`; sin `--title`, usan `Pendiente`.
 
+Las notas generales son compartidas y no pertenecen a ningún proyecto:
+
+```sh
+orgm-todo note add "Nota para todos"
+orgm-todo note list
+```
+
+Guarda el ID `orgm-xxxxxxxx` devuelto por `note add`. La lista muestra
+`General / Pendiente: Nota para todos`. Para borrarla, sustituye el ID del ejemplo
+por el recibido:
+
+```sh
+orgm-todo note delete orgm-xxxxxxxx
+```
+
+En el menú, entra en `Notes` y selecciona `General` cuando se solicite el proyecto.
+Para una nota ligada a un proyecto existente, usa `--project "Nombre"` al agregar,
+listar o borrar. Ejemplos de operaciones sobre proyectos:
+
 ```sh
 orgm-todo note add "Confirm quotation" --project "New project" --title Correcciones
 orgm-todo note list --project "New project"
@@ -119,3 +170,39 @@ orgm-todo summary --from 2026-10-01 --to 2026-10-31 --include-undated
 ```
 
 `summary` scans active projects only. It groups pending tasks by title and project; completed tasks, notes, client files, archived projects and all `General.md` index links are excluded. Time ranges are inclusive; `--week` is Monday through Sunday in local time.
+
+## Publicación manual (mantenedor)
+
+Desde la raíz del repositorio:
+
+```sh
+uv build --no-sources --clear --force-pep517
+uv publish --dry-run dist/*
+```
+
+`--force-pep517` obliga a uv 0.11.28 a usar el backend declarado
+`uv_build>=0.12.5,<0.13.0`, en lugar de su backend rápido integrado. Se generan
+el wheel y el archivo fuente de la versión `0.1.0` en `dist/`.
+El modo `--dry-run` valida la publicación sin subir los artefactos.
+
+Después de configurar `UV_PUBLISH_TOKEN` de forma segura **fuera del repositorio**:
+
+```sh
+uv publish dist/*
+```
+
+Esta preparación valida los artefactos, pero no publica la versión ni maneja
+credenciales. Comprueba la disponibilidad y los permisos del nombre `orgm-todo`
+en PyPI antes de publicar; un nombre disponible no queda reservado por el dry-run.
+
+## Licencia
+
+[PolyForm Noncommercial License 1.0.0](LICENSE)
+(`PolyForm-Noncommercial-1.0.0`): licencia **source-available**, no open source
+aprobada por OSI. Permite los fines no comerciales definidos en sus términos;
+al redistribuir, deben propagarse los términos y el aviso de atribución
+`Required Notice: Copyright 2026 osmar (https://github.com/osmargm1202).`
+
+El texto de `LICENSE` rige los permisos y obligaciones. Incluye exclusión de
+garantía y responsabilidad hasta donde permita la ley; no garantiza inmunidad
+frente a reclamaciones ni gastos legales.
